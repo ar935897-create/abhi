@@ -1,9 +1,28 @@
 import { Tabs } from 'expo-router';
-import { Chrome as Home, MapPin, Users, Trophy, MessageSquare, Phone, MessageCircle } from 'lucide-react-native';
+import { Chrome as Home, MapPin, Users, Trophy, MessageSquare, Phone, MessageCircle, Hammer } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react';
+import { getCurrentUser, getUserProfile } from '../../lib/supabase';
 
 export default function TabLayout() {
   const { t } = useTranslation();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const { user: currentUser } = await getCurrentUser();
+      if (currentUser) {
+        const { data: profile } = await getUserProfile(currentUser.id);
+        setUser(profile);
+      }
+    } catch (error) {
+      console.error('Error loading user:', error);
+    }
+  };
   
   return (
     <Tabs
@@ -84,6 +103,16 @@ export default function TabLayout() {
           tabBarIcon: ({ size, color }) => (
             <MessageCircle size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="work"
+        options={{
+          title: 'My Work',
+          tabBarIcon: ({ size, color }) => (
+            <Hammer size={size} color={color} />
+          ),
+          href: user?.user_type === 'tender' ? '/contractor-work' : null,
         }}
       />
     </Tabs>

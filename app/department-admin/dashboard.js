@@ -202,6 +202,15 @@ export default function DepartmentAdminDashboard() {
 
       if (updateError) console.error('Error updating issue workflow:', updateError);
 
+      // Create notification for contractors
+      await createNotification({
+        title: 'New Tender Available',
+        message: `A new tender "${tenderData.title}" is available for bidding`,
+        type: 'tender_update',
+        related_id: tender.id,
+        related_type: 'tender',
+        user_id: null // Will be sent to all contractors
+      });
       Alert.alert(
         'Success',
         'Tender has been created successfully and is now available for contractors to bid',
@@ -253,8 +262,37 @@ export default function DepartmentAdminDashboard() {
           onPress: async () => {
             try {
               setProcessingBid(true);
+              
+              // Get bid details for contractor assignment
+              const { data: bidData, error: bidError } = await supabase
+                .from('bids')
+                .select('user_id, tender_id')
+                .eq('id', bidId)
+                .single();
+              
+              if (bidError) throw bidError;
+              
               const { error } = await acceptBid(bidId, tenderId);
               if (error) throw error;
+              
+              // Assign tender to contractor
+              const { error: assignError } = await assignTenderToContractor(
+                tenderId, 
+                bidData.user_id, 
+                'Bid accepted - work assigned'
+              );
+              
+              if (assignError) console.error('Error assigning to contractor:', assignError);
+              
+              // Create notification for contractor
+              await createNotification({
+                user_id: bidData.user_id,
+                title: 'Bid Accepted!',
+                message: 'Congratulations! Your bid has been accepted. You can now start the work.',
+                type: 'tender_update',
+                related_id: tenderId,
+                related_type: 'tender'
+              });
               
               Alert.alert('Success', 'Bid accepted successfully');
               setShowBidsModal(false);

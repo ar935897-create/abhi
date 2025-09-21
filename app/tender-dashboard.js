@@ -74,55 +74,28 @@ export default function TenderDashboard() {
     try {
       setLoading(true);
       
-      // Get all available tenders (including department-created ones)
-      const { data: allTenders, error: tendersError } = await supabase
-        .from('tenders')
-        .select(`
-          *,
-          posted_by_profile:posted_by (
-            full_name,
-            user_type
-          ),
-          department:department_id (
-            name,
-            category
-          ),
-          source_issue:source_issue_id (
-            title,
-            category,
-            location_name
-          ),
-          bids:bids (
-            id,
-            amount,
-            user_id,
-            status
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (tendersError) throw tendersError;
-
-      const [bidsResult] = await Promise.all([
-        getUserBids()
-      ]);
-
-      setTenders(allTenders || []);
-      if (bidsResult.data) setUserBids(bidsResult.data);
+      // Use enhanced contractor dashboard
+      const { data: dashboardData, error: dashboardError } = await getContractorDashboard();
+      if (dashboardError) throw dashboardError;
+      
+      setTenders(dashboardData.availableTenders || []);
+      setUserBids(dashboardData.userBids || []);
 
       // Calculate stats
-      const availableTenders = allTenders?.filter(t => t.status === 'available').length || 0;
-      const activeBids = bidsResult.data?.filter(b => b.status === 'submitted').length || 0;
-      const wonContracts = bidsResult.data?.filter(b => b.status === 'accepted').length || 0;
+      const availableTenders = dashboardData.availableTenders?.filter(t => t.status === 'available').length || 0;
+      const activeBids = dashboardData.userBids?.filter(b => b.status === 'submitted').length || 0;
+      const wonContracts = dashboardData.userBids?.filter(b => b.status === 'accepted').length || 0;
+      const assignedWork = dashboardData.assignedWork?.length || 0;
       
       setStats({
         availableTenders,
         activeBids,
         wonContracts,
+        assignedWork,
         totalEarnings: wonContracts * 15000, // Placeholder calculation
         completionRate: wonContracts > 0 ? 94 : 0,
-        avgBidValue: bidsResult.data?.length > 0 ? 
-          bidsResult.data.reduce((sum, bid) => sum + (bid.amount || 0), 0) / bidsResult.data.length : 0
+        avgBidValue: dashboardData.userBids?.length > 0 ? 
+          dashboardData.userBids.reduce((sum, bid) => sum + (bid.amount || 0), 0) / dashboardData.userBids.length : 0
       });
 
     } catch (error) {
@@ -165,6 +138,7 @@ export default function TenderDashboard() {
     { id: 'available', label: 'Available', count: stats.availableTenders },
     { id: 'bidded', label: 'My Bids', count: stats.activeBids },
     { id: 'won', label: 'Won', count: stats.wonContracts },
+    { id: 'assigned', label: 'Assigned Work', count: stats.assignedWork },
     { id: 'completed', label: 'Completed', count: 0 },
   ];
 
@@ -511,7 +485,13 @@ export default function TenderDashboard() {
 
                 {userBids.find(bid => bid.tender_id === tender.id && bid.status === 'accepted') && (
                   <TouchableOpacity style={[styles.actionButton, styles.startButton]}>
-                    <Text style={styles.startButtonText}>Start Work</Text>
+                    <Text style={styles.startButtonText} 
+                      onPress={() => {
+                        setSelectedWorkItem({ tenderId: tender.id, issueId: tender.source_issue?.id });
+                        setShowProgressTracker(true);
+                      }}>
+                      Track Progress
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -519,6 +499,18 @@ export default function TenderDashboard() {
           ))}
         </View>
       </View>
+
+      {/* Work Progress Tracker Modal */}
+      <WorkProgressTracker
+        visible={showProgressTracker}
+        onClose={() => {
+          setShowProgressTracker(false);
+          setSelectedWorkItem(null);
+        }}
+        issueId={selectedWorkItem?.issueId}
+        tenderId={selectedWorkItem?.tenderId}
+        contractorId={user?.id}
+      />
 
       {/* Bid Form Modal */}
       {showBidForm && selectedTender && (

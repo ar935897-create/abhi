@@ -140,6 +140,25 @@ export default function AreaSuperAdminIssues() {
 
       if (error) throw error;
 
+      // Get department admin for notification
+      const { data: departmentAdmin } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('assigned_department_id', selectedDepartment)
+        .eq('user_type', 'department_admin')
+        .single();
+
+      // Create notification for department admin
+      if (departmentAdmin) {
+        await createNotification({
+          user_id: departmentAdmin.id,
+          title: 'New Issue Assigned',
+          message: `Issue "${selectedIssue.title}" has been assigned to your department`,
+          type: 'issue_update',
+          related_id: selectedIssue.id,
+          related_type: 'issue'
+        });
+      }
       Alert.alert(
         'Success',
         'Issue has been assigned to the department successfully',
