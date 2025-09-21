@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { 
-  ArrowLeft, Hammer, Clock, CheckCircle, MapPin, FileText, 
-  TrendingUp, Calendar, DollarSign, User, Building, Activity
-} from 'lucide-react-native';
+import { ArrowLeft, Hammer, Clock, CircleCheck as CheckCircle, MapPin, FileText, TrendingUp, Calendar, DollarSign, User, Building, Activity } from 'lucide-react-native';
 import { 
   getContractorDashboard, 
   getWorkProgress, 
