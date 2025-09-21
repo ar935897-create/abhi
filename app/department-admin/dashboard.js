@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, RefreshControl, Alert, Modal, TextInput, Image } from 'react-native';
 import { 
   TriangleAlert as AlertTriangle, FileText, Users, Clock, CircleCheck as CheckCircle, 
-  TrendingUp, Send, X, Camera, Upload, MapPin, User, Building, Hammer
+  TrendingUp, Send, X, Camera, Upload, MapPin, User, Building, Hammer,
+  Activity
 } from 'lucide-react-native';
 import { 
   getDepartmentAdminDashboard, 
