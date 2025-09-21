@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { 
   ArrowLeft, Filter, Search, MapPin, Clock, CircleCheck as CheckCircle, 
-  TriangleAlert as AlertTriangle, FileText, Hammer, Send, X, User
+  TriangleAlert as AlertTriangle, FileText, Hammer, Send, X, User, Eye, Award
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { 
@@ -10,7 +10,10 @@ import {
   createTender,
   assignTenderToContractor,
   getCurrentUser,
-  getUserProfile
+  getUserProfile,
+  getBidsByTender,
+  acceptBid,
+  rejectBid
 } from '../../lib/supabase';
 
 export default function DepartmentAdminIssues() {
@@ -21,7 +24,10 @@ export default function DepartmentAdminIssues() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('department_assigned');
   const [showTenderModal, setShowTenderModal] = useState(false);
+  const [showBidsModal, setShowBidsModal] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
+  const [selectedTender, setSelectedTender] = useState(null);
+  const [tenderBids, setTenderBids] = useState([]);
   const [tenderData, setTenderData] = useState({
     title: '',
     description: '',
@@ -31,6 +37,8 @@ export default function DepartmentAdminIssues() {
     requirements: ''
   });
   const [creating, setCreating] = useState(false);
+  const [loadingBids, setLoadingBids] = useState(false);
+  const [processingBid, setProcessingBid] = useState(false);
   const [userDepartmentId, setUserDepartmentId] = useState(null);
 
   const filters = [
@@ -109,7 +117,7 @@ export default function DepartmentAdminIssues() {
         estimated_budget_min: parseFloat(tenderData.estimatedBudgetMin) || 0,
         estimated_budget_max: parseFloat(tenderData.estimatedBudgetMax) || 0,
         deadline_date: tenderData.deadlineDate,
-        submission_deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
+        submission_deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         priority: selectedIssue.priority,
         requirements: tenderData.requirements.split('\n').filter(r => r.trim()),
         status: 'available',
@@ -154,12 +162,96 @@ export default function DepartmentAdminIssues() {
     }
   };
 
+  const handleViewBids = async (issue) => {
+    try {
+      setLoadingBids(true);
+      
+      // Find the tender for this issue
+      const tender = issue.tender || { id: issue.id, title: issue.title };
+      setSelectedTender(tender);
+      
+      const { data: bids, error } = await getBidsByTender(tender.id);
+      if (error) throw error;
+      
+      setTenderBids(bids || []);
+      setShowBidsModal(true);
+    } catch (error) {
+      console.error('Error loading bids:', error);
+      Alert.alert('Error', 'Failed to load bids');
+    } finally {
+      setLoadingBids(false);
+    }
+  };
+
+  const handleAcceptBid = async (bidId, tenderId) => {
+    Alert.alert(
+      'Accept Bid',
+      'Are you sure you want to accept this bid? This will reject all other bids for this tender.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: async () => {
+            try {
+              setProcessingBid(true);
+              const { error } = await acceptBid(bidId, tenderId);
+              if (error) throw error;
+              
+              Alert.alert('Success', 'Bid accepted successfully');
+              setShowBidsModal(false);
+              await loadData();
+            } catch (error) {
+              console.error('Error accepting bid:', error);
+              Alert.alert('Error', 'Failed to accept bid');
+            } finally {
+              setProcessingBid(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleRejectBid = async (bidId) => {
+    Alert.alert(
+      'Reject Bid',
+      'Are you sure you want to reject this bid?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setProcessingBid(true);
+              const { error } = await rejectBid(bidId);
+              if (error) throw error;
+              
+              Alert.alert('Success', 'Bid rejected');
+              // Reload bids
+              const { data: updatedBids } = await getBidsByTender(selectedTender.id);
+              setTenderBids(updatedBids || []);
+            } catch (error) {
+              console.error('Error rejecting bid:', error);
+              Alert.alert('Error', 'Failed to reject bid');
+            } finally {
+              setProcessingBid(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const getStatusColor = (status) => {
     const colors = {
       pending: '#F59E0B',
       acknowledged: '#3B82F6',
       in_progress: '#1E40AF',
       resolved: '#10B981',
+      submitted: '#8B5CF6',
+      accepted: '#10B981',
+      rejected: '#EF4444',
     };
     return colors[status] || '#6B7280';
   };
@@ -183,6 +275,20 @@ export default function DepartmentAdminIssues() {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  // Check if issue has existing tender
+  const hasExistingTender = (issue) => {
+    return issue.workflow_stage === 'contractor_assigned' || issue.tender;
   };
 
   return (
@@ -305,6 +411,16 @@ export default function DepartmentAdminIssues() {
                   </View>
                 )}
 
+                {/* Tender Status */}
+                {hasExistingTender(issue) && (
+                  <View style={styles.tenderStatus}>
+                    <FileText size={14} color="#F59E0B" />
+                    <Text style={styles.tenderStatusText}>
+                      Tender created • {issue.tender?.bids?.length || 0} bids received
+                    </Text>
+                  </View>
+                )}
+
                 {/* Assignment History */}
                 {issue.assignments && issue.assignments.length > 0 && (
                   <View style={styles.assignmentHistory}>
@@ -319,13 +435,25 @@ export default function DepartmentAdminIssues() {
 
                 {/* Actions */}
                 <View style={styles.issueActions}>
-                  {issue.workflow_stage === 'department_assigned' && (
+                  {issue.workflow_stage === 'department_assigned' && !hasExistingTender(issue) && (
                     <TouchableOpacity
                       style={styles.tenderButton}
                       onPress={() => handleCreateTender(issue)}
                     >
                       <FileText size={16} color="#FFFFFF" />
                       <Text style={styles.tenderButtonText}>Create Tender</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {hasExistingTender(issue) && (
+                    <TouchableOpacity
+                      style={styles.viewBidsButton}
+                      onPress={() => handleViewBids(issue)}
+                    >
+                      <Eye size={16} color="#1E40AF" />
+                      <Text style={styles.viewBidsButtonText}>
+                        View Bids ({issue.tender?.bids?.length || 0})
+                      </Text>
                     </TouchableOpacity>
                   )}
                   
@@ -440,6 +568,103 @@ export default function DepartmentAdminIssues() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Bids Modal */}
+      <Modal visible={showBidsModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Tender Bids</Text>
+              <TouchableOpacity onPress={() => setShowBidsModal(false)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedTender && (
+              <View style={styles.tenderInfo}>
+                <Text style={styles.tenderInfoTitle}>{selectedTender.title}</Text>
+              </View>
+            )}
+
+            <ScrollView style={styles.bidsContainer}>
+              {loadingBids ? (
+                <View style={styles.loadingContainer}>
+                  <Text style={styles.loadingText}>Loading bids...</Text>
+                </View>
+              ) : tenderBids.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No bids received yet</Text>
+                </View>
+              ) : (
+                <View style={styles.bidsList}>
+                  {tenderBids.map((bid) => (
+                    <View key={bid.id} style={styles.bidCard}>
+                      {/* Bid Header */}
+                      <View style={styles.bidHeader}>
+                        <View style={styles.bidderInfo}>
+                          <Text style={styles.bidderName}>
+                            {bid.contractor?.full_name || 'Anonymous Contractor'}
+                          </Text>
+                          <Text style={styles.bidAmount}>{formatCurrency(bid.amount)}</Text>
+                        </View>
+                        <View style={[styles.bidStatusBadge, { backgroundColor: getStatusColor(bid.status) + '20' }]}>
+                          <Text style={[styles.bidStatusText, { color: getStatusColor(bid.status) }]}>
+                            {bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Bid Details */}
+                      <Text style={styles.bidDetails}>{bid.details}</Text>
+                      
+                      {bid.timeline && (
+                        <View style={styles.bidMetaRow}>
+                          <Clock size={12} color="#6B7280" />
+                          <Text style={styles.bidMetaText}>Timeline: {bid.timeline}</Text>
+                        </View>
+                      )}
+
+                      <View style={styles.bidMetaRow}>
+                        <Text style={styles.bidMetaText}>Submitted: {formatDate(bid.submitted_at)}</Text>
+                      </View>
+
+                      {/* Bid Actions */}
+                      {bid.status === 'submitted' && (
+                        <View style={styles.bidActions}>
+                          <TouchableOpacity
+                            style={[styles.bidActionButton, styles.acceptButton]}
+                            onPress={() => handleAcceptBid(bid.id, selectedTender.id)}
+                            disabled={processingBid}
+                          >
+                            <CheckCircle size={14} color="#FFFFFF" />
+                            <Text style={styles.bidActionText}>Accept</Text>
+                          </TouchableOpacity>
+                          
+                          <TouchableOpacity
+                            style={[styles.bidActionButton, styles.rejectButton]}
+                            onPress={() => handleRejectBid(bid.id)}
+                            disabled={processingBid}
+                          >
+                            <X size={14} color="#FFFFFF" />
+                            <Text style={styles.bidActionText}>Reject</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {bid.status === 'accepted' && (
+                        <View style={styles.acceptedInfo}>
+                          <Award size={14} color="#10B981" />
+                          <Text style={styles.acceptedText}>Bid Accepted</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -659,6 +884,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
   },
+  tenderStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+    marginBottom: 12,
+  },
+  tenderStatusText: {
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '600',
+  },
   assignmentHistory: {
     backgroundColor: '#F9FAFB',
     padding: 12,
@@ -694,6 +934,21 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tenderButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  viewBidsButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E40AF',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  viewBidsButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
@@ -768,6 +1023,124 @@ const styles = StyleSheet.create({
   textArea: {
     height: 80,
     textAlignVertical: 'top',
+  },
+  tenderInfo: {
+    backgroundColor: '#F0F9FF',
+    padding: 16,
+    marginHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  tenderInfoTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E40AF',
+  },
+  bidsContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  bidsList: {
+    gap: 12,
+  },
+  bidCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  bidHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  bidderInfo: {
+    flex: 1,
+  },
+  bidderName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  bidAmount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#10B981',
+  },
+  bidStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  bidStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  bidDetails: {
+    fontSize: 14,
+    color: '#6B7280',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  bidMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  bidMetaText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  bidActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 12,
+  },
+  bidActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  acceptButton: {
+    backgroundColor: '#10B981',
+  },
+  rejectButton: {
+    backgroundColor: '#EF4444',
+  },
+  bidActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  acceptedInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+    marginTop: 12,
+  },
+  acceptedText: {
+    fontSize: 12,
+    color: '#10B981',
+    fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
   },
   modalActions: {
     flexDirection: 'row',

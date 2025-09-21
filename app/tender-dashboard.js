@@ -74,16 +74,44 @@ export default function TenderDashboard() {
     try {
       setLoading(true);
       
-      const [tendersResult, bidsResult] = await Promise.all([
-        getTenders('all'),
+      // Get all available tenders (including department-created ones)
+      const { data: allTenders, error: tendersError } = await supabase
+        .from('tenders')
+        .select(`
+          *,
+          posted_by_profile:posted_by (
+            full_name,
+            user_type
+          ),
+          department:department_id (
+            name,
+            category
+          ),
+          source_issue:source_issue_id (
+            title,
+            category,
+            location_name
+          ),
+          bids:bids (
+            id,
+            amount,
+            user_id,
+            status
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (tendersError) throw tendersError;
+
+      const [bidsResult] = await Promise.all([
         getUserBids()
       ]);
 
-      if (tendersResult.data) setTenders(tendersResult.data);
+      setTenders(allTenders || []);
       if (bidsResult.data) setUserBids(bidsResult.data);
 
       // Calculate stats
-      const availableTenders = tendersResult.data?.filter(t => t.status === 'available').length || 0;
+      const availableTenders = allTenders?.filter(t => t.status === 'available').length || 0;
       const activeBids = bidsResult.data?.filter(b => b.status === 'submitted').length || 0;
       const wonContracts = bidsResult.data?.filter(b => b.status === 'accepted').length || 0;
       
@@ -387,11 +415,33 @@ export default function TenderDashboard() {
               <Text style={styles.tenderTitle}>{tender.title}</Text>
               <Text style={styles.tenderDescription}>{tender.description}</Text>
 
+              {/* Department Info */}
+              {tender.department && (
+                <View style={styles.departmentInfo}>
+                  <Building size={14} color="#8B5CF6" />
+                  <Text style={styles.departmentText}>
+                    Posted by: {tender.department.name}
+                  </Text>
+                </View>
+              )}
+
+              {/* Source Issue Info */}
+              {tender.source_issue && (
+                <View style={styles.sourceIssueInfo}>
+                  <AlertTriangle size={14} color="#F59E0B" />
+                  <Text style={styles.sourceIssueText}>
+                    Related to: {tender.source_issue.title}
+                  </Text>
+                </View>
+              )}
+
               {/* Tender Details */}
               <View style={styles.tenderDetails}>
                 <View style={styles.detailRow}>
                   <MapPin size={14} color="#6B7280" />
-                  <Text style={styles.detailText}>Location: {tender.location || 'Not specified'}</Text>
+                  <Text style={styles.detailText}>
+                    Location: {tender.source_issue?.location_name || tender.location || 'Not specified'}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
                   <DollarSign size={14} color="#10B981" />
@@ -402,6 +452,12 @@ export default function TenderDashboard() {
                 <View style={styles.detailRow}>
                   <Calendar size={14} color="#F59E0B" />
                   <Text style={styles.detailText}>Deadline: {formatDate(tender.deadline_date)}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Users size={14} color="#8B5CF6" />
+                  <Text style={styles.detailText}>
+                    {tender.bids?.length || 0} total bids • Submission deadline: {formatDate(tender.submission_deadline)}
+                  </Text>
                 </View>
               </View>
 
@@ -724,6 +780,36 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     lineHeight: 20,
     marginBottom: 16,
+  },
+  departmentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+    marginBottom: 8,
+  },
+  departmentText: {
+    fontSize: 12,
+    color: '#8B5CF6',
+    fontWeight: '600',
+  },
+  sourceIssueInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+    marginBottom: 12,
+  },
+  sourceIssueText: {
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '500',
   },
   tenderDetails: {
     gap: 8,
